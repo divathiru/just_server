@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watershed // Telemetry</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; color:#fff; font-family:'Manrope',sans-serif; overflow-x:hidden; }
+  .grid-bg { position:fixed; inset:0; z-index:0; pointer-events:none;
+    background-image: linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+                       linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 80px 80px; }
+  .wrap { position:relative; z-index:1; min-height:100vh; padding:24px 32px; display:flex; flex-direction:column; gap:18px; }
+  header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  .brand { font-size:18px; letter-spacing:0.02em; }
+  .brand span { color:#AFDDFF; }
+  .conn { display:flex; align-items:center; gap:10px; font-size:12px; color:rgba(255,255,255,0.6); flex-wrap:wrap; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#8FE3B3; flex-shrink:0; }
+  .dot.off { background:#FF8A80; }
+  .api-input { background:transparent; border:1px solid rgba(255,255,255,0.15); color:#fff; font-family:inherit; font-size:12px; padding:6px 10px; width:260px; }
+  .api-input::placeholder { color:rgba(255,255,255,0.3); }
+  .apply-btn { background:transparent; border:1px solid rgba(255,255,255,0.2); color:#fff; font-family:inherit; font-size:12px; padding:6px 12px; cursor:pointer; }
+  .apply-btn:hover { border-color:#AFDDFF; color:#AFDDFF; }
+  .demo-banner { font-size:12px; color:#04101c; background:#AFDDFF; padding:6px 12px; width:fit-content; }
+  .hero { display:grid; grid-template-columns: 1.3fr 1fr; gap:20px; }
+  @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+  .card { border:1px solid rgba(255,255,255,0.12); padding:24px; }
+  .status-badge { display:inline-block; font-size:12px; padding:4px 10px; margin-bottom:18px; }
+  .status-green { background:#8FE3B3; color:#04351d; }
+  .status-amber { background:#FFD37A; color:#4a3300; }
+  .status-red   { background:#FF8A80; color:#4a0d08; }
+  .readings { display:flex; gap:36px; margin-bottom:16px; flex-wrap:wrap; }
+  .reading-label { font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:4px; }
+  .reading-value { font-size:42px; font-weight:700; line-height:1; }
+  .reading-unit { font-size:14px; color:rgba(255,255,255,0.5); }
+  canvas { width:100%; height:70px; display:block; margin-top:4px; }
+  .side-title { font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px; }
+  .struct-id { font-size:15px; margin-bottom:2px; }
+  .struct-meta { font-size:12px; color:rgba(255,255,255,0.5); }
+  .divider { height:1px; background:rgba(255,255,255,0.1); margin:16px 0; }
+  .capacity-val { font-size:30px; font-weight:700; }
+  .json-box { font-family:'Courier New',monospace; font-size:11px; color:rgba(175,221,255,0.85); background:rgba(255,255,255,0.03); padding:12px; word-break:break-all; margin-top:16px; max-height:100px; overflow:auto; border:1px solid rgba(255,255,255,0.06); }
+  .footer { display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px; margin-top:auto; padding-top:8px; }
+  .recharge { font-size:13px; color:rgba(255,255,255,0.6); }
+  .recharge b { color:#AFDDFF; font-size:20px; font-weight:700; margin-left:6px; }
+  .timestamp { font-size:11px; color:rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="wrap">
+  <header>
+    <div class="brand">WATERSHED <span>// TELEMETRY</span></div>
+    <div class="conn">
+      <span class="dot" id="connDot"></span>
+      <span id="connLabel">connecting…</span>
+      <input class="api-input" id="apiUrl" value="/telemetry/latest" placeholder="/telemetry/latest">
+      <button class="apply-btn" id="applyBtn">apply</button>
+    </div>
+  </header>
+
+  <div id="demoBanner" class="demo-banner" style="display:none;">demo mode — no live endpoint reachable, showing simulated data</div>
+
+  <div class="hero">
+    <div class="card">
+      <span id="statusBadge" class="status-badge status-green">green — functional</span>
+      <div class="readings">
+        <div>
+          <div class="reading-label">water depth</div>
+          <div class="reading-value"><span id="waterVal">--</span><span class="reading-unit"> cm</span></div>
+        </div>
+        <div>
+          <div class="reading-label">bed distance (silt)</div>
+          <div class="reading-value"><span id="bedVal">--</span><span class="reading-unit"> cm</span></div>
+        </div>
+      </div>
+      <div class="reading-label">water depth — recent readings</div>
+      <canvas id="spark" width="600" height="70"></canvas>
+      <div class="json-box" id="rawJson">waiting for first reading…</div>
+    </div>
+    <div class="card">
+      <div class="side-title">structure</div>
+      <div class="struct-id" id="structId">STR-011</div>
+      <div class="struct-meta" id="structMeta">battery -- V · last update --</div>
+      <div class="divider"></div>
+      <div class="side-title">capacity retained (vs. this session's baseline)</div>
+      <div class="capacity-val" id="capacityVal">--%</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="recharge">est. recharge at risk this monsoon<b id="rechargeVal">-- m³</b></div>
+    <div class="timestamp" id="lastUpdate">no data yet</div>
+  </div>
+</div>
+
+<script>
+let history = [];
+let baselineBed = null;
+let apiUrl = document.getElementById('apiUrl').value.trim();
+let pollTimer = null;
+
+function statusFromCapacity(pct) {
+  if (pct >= 70) return ['green', 'functional'];
+  if (pct >= 40) return ['amber', 'degraded — schedule desilting'];
+  return ['red', 'critical — urgent work order'];
+}
+
+function drawSpark(values) {
+  const c = document.getElementById('spark');
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (values.length < 2) return;
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = (max - min) || 1;
+  ctx.beginPath();
+  ctx.strokeStyle = '#AFDDFF';
+  ctx.lineWidth = 2;
+  values.forEach((v, i) => {
+    const x = (i / (values.length - 1)) * c.width;
+    const y = c.height - ((v - min) / range) * (c.height - 10) - 5;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function applyReading(r) {
+  if (baselineBed === null && r.bed_distance_cm > 0) baselineBed = r.bed_distance_cm;
+  const capacityPct = baselineBed ? Math.max(0, Math.min(100, (r.bed_distance_cm / baselineBed) * 100)) : 100;
+  const [statusClass, statusLabel] = statusFromCapacity(capacityPct);
+
+  document.getElementById('waterVal').textContent = (r.water_depth_cm ?? '--');
+  document.getElementById('bedVal').textContent = (r.bed_distance_cm ?? '--');
+  document.getElementById('structId').textContent = r.structure_id || 'STR-011';
+  document.getElementById('structMeta').textContent = `battery ${r.battery_voltage ?? '--'} V · last update ${new Date().toLocaleTimeString()}`;
+  document.getElementById('capacityVal').textContent = capacityPct.toFixed(0) + '%';
+  const badge = document.getElementById('statusBadge');
+  badge.className = 'status-badge status-' + statusClass;
+  badge.textContent = statusClass + ' — ' + statusLabel;
+  document.getElementById('rawJson').textContent = JSON.stringify(r);
+  document.getElementById('lastUpdate').textContent = 'updated ' + new Date().toLocaleTimeString();
+
+  const shortfall = Math.max(0, 32 - (r.water_depth_cm || 0)); // illustrative only, tune to your benchmark
+  const recharge = (shortfall * 1200 * 90 / 1000).toFixed(0);
+  document.getElementById('rechargeVal').textContent = recharge + ' m³';
+
+  history.push(r.water_depth_cm || 0);
+  if (history.length > 20) history.shift();
+  drawSpark(history);
+}
+
+function setConn(ok, demo) {
+  const dot = document.getElementById('connDot');
+  const label = document.getElementById('connLabel');
+  dot.className = 'dot' + (ok ? '' : ' off');
+  label.textContent = ok ? 'live' : 'offline';
+  document.getElementById('demoBanner').style.display = demo ? 'block' : 'none';
+}
+
+function mockReading() {
+  const t = Date.now() / 1000;
+  return {
+    structure_id: 'STR-011',
+    water_depth_cm: Number((20 + 10 * Math.sin(t / 20)).toFixed(1)),
+    bed_distance_cm: Number((110 - (t % 600) / 10).toFixed(0)),
+    battery_voltage: 3.9
+  };
+}
+
+async function poll() {
+  if (!apiUrl) { applyReading(mockReading()); setConn(false, true); return; }
+  try {
+    const res = await fetch(apiUrl, { cache: 'no-store' });
+    if (!res.ok) throw new Error('bad status');
+    const data = await res.json();
+    const r = Array.isArray(data) ? data[data.length - 1] : data;
+    applyReading(r);
+    setConn(true, false);
+  } catch (e) {
+    applyReading(mockReading());
+    setConn(false, true);
+  }
+}
+
+document.getElementById('applyBtn').addEventListener('click', () => {
+  apiUrl = document.getElementById('apiUrl').value.trim();
+  clearInterval(pollTimer);
+  poll();
+  pollTimer = setInterval(poll, 5000);
+});
+
+poll();
+pollTimer = setInterval(poll, 5000);
+</script>
+</body>
+</html>
